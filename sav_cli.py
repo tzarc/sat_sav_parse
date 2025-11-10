@@ -460,6 +460,123 @@ def removeMercerShrine(levels, targetInstanceName: str) -> bool:
    print(f"Removing Mercer Shrine {targetInstanceName} at {position}")
    return removeInstance(levels, "Mercer Shrine", rootObject, targetInstanceName, position)
 
+def setCrashSiteState(levels, instanceName: str, state: str) -> bool:
+   exists = False
+   currentState = "UNDISCOVERED"
+
+   for level in levels:
+      for actorOrComponentObjectHeader in level.actorAndComponentObjectHeaders:
+         if isinstance(actorOrComponentObjectHeader, sav_parse.ActorHeader):
+            if actorOrComponentObjectHeader.instanceName == instanceName and actorOrComponentObjectHeader.typePath == sav_data.data.CRASH_SITE:
+               exists = True
+               break
+      if exists:
+         break
+
+   if exists:
+      for level in levels:
+         for object in level.objects:
+            if object.instanceName == instanceName:
+               hasBeenOpened = sav_parse.getPropertyValue(object.properties, "mHasBeenOpened")
+               if hasBeenOpened is not None and hasBeenOpened:
+                  hasBeenLooted = sav_parse.getPropertyValue(object.properties, "mHasBeenLooted")
+                  if hasBeenLooted is None:
+                     hasBeenLooted = True
+                  if hasBeenLooted:
+                     currentState = "EXPLORED_OPEN_EMPTY"
+                  else:
+                     currentState = "EXPLORED_OPEN_FULL"
+               else:
+                  currentState = "EXPLORED_CLOSED"
+               break
+
+   if currentState == state:
+      return False
+
+   if state == "UNDISCOVERED":
+      print(f"WARNING: Setting crash site to UNDISCOVERED not fully implemented for {instanceName}, emulating with EXPLORED_CLOSED")
+      state = "EXPLORED_CLOSED"
+
+   if state == "EXPLORED_CLOSED":
+      if not exists:
+         print(f"WARNING: Cannot set non-existent crash site to EXPLORED_CLOSED for {instanceName}")
+         return False
+      for level in levels:
+         for object in level.objects:
+            if object.instanceName == instanceName:
+               opened = False
+               looted = False
+               for prop in object.properties:
+                  if isinstance(prop, list) and len(prop) >= 2:
+                     if prop[0] == "mHasBeenOpened":
+                        prop[1] = False
+                        opened = True
+                     elif prop[0] == "mHasBeenLooted":
+                        prop[1] = False
+                        looted = True
+               if not opened:
+                  object.properties.append(["mHasBeenOpened", False])
+                  object.propertyTypes.append(["mHasBeenOpened", "BoolProperty", 0])
+               if not looted:
+                  object.properties.append(["mHasBeenLooted", False])
+                  object.propertyTypes.append(["mHasBeenLooted", "BoolProperty", 0])
+               print(f"Set crash site {instanceName} to EXPLORED_CLOSED")
+               return True
+
+   if state == "EXPLORED_OPEN_EMPTY":
+      if not exists:
+         print(f"WARNING: Cannot set non-existent crash site to EXPLORED_OPEN_EMPTY for {instanceName}")
+         return False
+      for level in levels:
+         for object in level.objects:
+            if object.instanceName == instanceName:
+               opened = False
+               looted = False
+               for prop in object.properties:
+                  if isinstance(prop, list) and len(prop) >= 2:
+                     if prop[0] == "mHasBeenOpened":
+                        prop[1] = True
+                        opened = True
+                     elif prop[0] == "mHasBeenLooted":
+                        prop[1] = True
+                        looted = True
+               if not opened:
+                  object.properties.append(["mHasBeenOpened", True])
+                  object.propertyTypes.append(["mHasBeenOpened", "BoolProperty", 0])
+               if not looted:
+                  object.properties.append(["mHasBeenLooted", True])
+                  object.propertyTypes.append(["mHasBeenLooted", "BoolProperty", 0])
+               print(f"Set crash site {instanceName} to EXPLORED_OPEN_EMPTY")
+               return True
+
+   if state == "EXPLORED_OPEN_FULL":
+      if not exists:
+         print(f"WARNING: Cannot set non-existent crash site to EXPLORED_OPEN_FULL for {instanceName}")
+         return False
+      for level in levels:
+         for object in level.objects:
+            if object.instanceName == instanceName:
+               opened = False
+               looted = False
+               for prop in object.properties:
+                  if isinstance(prop, list) and len(prop) >= 2:
+                     if prop[0] == "mHasBeenOpened":
+                        prop[1] = True
+                        opened = True
+                     elif prop[0] == "mHasBeenLooted":
+                        prop[1] = False
+                        looted = True
+               if not opened:
+                  object.properties.append(["mHasBeenOpened", True])
+                  object.propertyTypes.append(["mHasBeenOpened", "BoolProperty", 0])
+               if not looted:
+                  object.properties.append(["mHasBeenLooted", False])
+                  object.propertyTypes.append(["mHasBeenLooted", "BoolProperty", 0])
+               print(f"Set crash site {instanceName} to EXPLORED_OPEN_FULL")
+               return True
+
+   return False
+
 def printUsage() -> None:
    print()
    print("USAGE:")
@@ -480,10 +597,13 @@ def printUsage() -> None:
    print("   py sav_cli.py --change-num-inventory-slots <num-inventory-slots> <original-save-filename> <new-save-filename> [--same-time]")
    print("   py sav_cli.py --restore-somersloops <original-save-filename> <new-save-filename> [--same-time]")
    print("   py sav_cli.py --restore-mercer-spheres <original-save-filename> <new-save-filename> [--same-time]")
+   print("   py sav_cli.py --restore-crash-sites <original-save-filename> <new-save-filename> [--same-time]")
    print("   py sav_cli.py --export-somersloops <save-filename> <output-json-filename>")
    print("   py sav_cli.py --export-mercer-spheres <save-filename> <output-json-filename>")
+   print("   py sav_cli.py --export-crash-sites <save-filename> <output-json-filename>")
    print("   py sav_cli.py --import-somersloops <original-save-filename> <input-json-filename> <new-save-filename> [--same-time]")
    print("   py sav_cli.py --import-mercer-spheres <original-save-filename> <input-json-filename> <new-save-filename> [--same-time]")
+   print("   py sav_cli.py --import-crash-sites <original-save-filename> <input-json-filename> <new-save-filename> [--same-time]")
    print("   py sav_cli.py --remember-username <player-num> <username-alias>")
    print("   py sav_cli.py --list-vehicle-paths <save-filename>")
    print("   py sav_cli.py --export-vehicle-path <path-name> <save-filename> <output-json-filename>")
@@ -491,7 +611,6 @@ def printUsage() -> None:
    print("   py sav_cli.py --export-dimensional-depot <save-filename> <output-json-filename>")
    print("   py sav_cli.py --reorder-dimensional-depot <original-save-filename> <input-json-filename> <new-save-filename> [--same-time]")
    print("   py sav_cli.py --adjust-dimensional-depot <original-save-filename> <item-name> <new-quantity> <new-save-filename> [--same-time]")
-   print("   py sav_cli.py --export-crash-sites <save-filename> <output-json-filename>")
    print("   py sav_cli.py --blueprint --show <save-filename>")
    print("   py sav_cli.py --blueprint --sort <original-save-filename> <new-save-filename> [--same-time]")
    print("   py sav_cli.py --blueprint --export <save-filename> <output-json-filename>")
@@ -1638,6 +1757,37 @@ if __name__ == '__main__':
       except Exception as error:
          raise Exception(f"ERROR: While validating resave of '{savFilename}' to '{outFilename}': {error}")
 
+   elif len(sys.argv) in (4, 5) and sys.argv[1] == "--restore-crash-sites" and os.path.isfile(sys.argv[2]):
+      savFilename = sys.argv[2]
+      outFilename = sys.argv[3]
+      changeTimeFlag = True
+      if len(sys.argv) == 5 and sys.argv[4] == "--same-time":
+         changeTimeFlag = False
+
+      modifiedFlag = False
+      try:
+         parsedSave = sav_parse.readFullSaveFile(savFilename)
+         for instanceName in sav_data.crashSites.CRASH_SITES:
+            if setCrashSiteState(parsedSave.levels, instanceName, "EXPLORED_CLOSED"):
+               modifiedFlag = True
+
+      except Exception as error:
+         raise Exception(f"ERROR: While processing '{savFilename}': {error}")
+
+      if not modifiedFlag:
+         print("ERROR: All crash sites already in initial state.", file=sys.stderr)
+         exit(1)
+
+      try:
+         if changeTimeFlag:
+            parsedSave.saveFileInfo.saveDateTimeInTicks += sav_parse.TICKS_IN_SECOND
+         sav_to_resave.saveFile(parsedSave, outFilename)
+         if VERIFY_CREATED_SAVE_FILES:
+            parsedSave = sav_parse.readFullSaveFile(outFilename)
+            print("Validation successful")
+      except Exception as error:
+         raise Exception(f"ERROR: While validating resave of '{savFilename}' to '{outFilename}': {error}")
+
    elif len(sys.argv) in (4, 5) and sys.argv[1] == "--export-somersloops" and os.path.isfile(sys.argv[2]):
       savFilename = sys.argv[2]
       outFilename = sys.argv[3]
@@ -2346,6 +2496,42 @@ if __name__ == '__main__':
 
       except Exception as error:
          raise Exception(f"ERROR: While processing '{savFilename}': {error}")
+
+   elif len(sys.argv) in (5, 6) and sys.argv[1] == "--import-crash-sites" and os.path.isfile(sys.argv[2]) and os.path.isfile(sys.argv[3]):
+      savFilename = sys.argv[2]
+      inFilename = sys.argv[3]
+      outFilename = sys.argv[4]
+      changeTimeFlag = True
+      if len(sys.argv) == 6 and sys.argv[5] == "--same-time":
+         changeTimeFlag = False
+
+      with open(inFilename, "r") as fin:
+         jdata = json.load(fin)
+
+      modifiedFlag = False
+      try:
+         parsedSave = sav_parse.readFullSaveFile(savFilename)
+
+         for instanceName in jdata:
+            if setCrashSiteState(parsedSave.levels, instanceName, jdata[instanceName]):
+               modifiedFlag = True
+
+      except Exception as error:
+         raise Exception(f"ERROR: While processing '{savFilename}': {error}")
+
+      if not modifiedFlag:
+         print("ERROR: All crash sites already match json.", file=sys.stderr)
+         exit(1)
+
+      try:
+         if changeTimeFlag:
+            parsedSave.saveFileInfo.saveDateTimeInTicks += sav_parse.TICKS_IN_SECOND
+         sav_to_resave.saveFile(parsedSave, outFilename)
+         if VERIFY_CREATED_SAVE_FILES:
+            parsedSave = sav_parse.readFullSaveFile(outFilename)
+            print("Validation successful")
+      except Exception as error:
+         raise Exception(f"ERROR: While validating resave of '{savFilename}' to '{outFilename}': {error}")
 
    elif len(sys.argv) == 4 and sys.argv[1] == "--blueprint" and sys.argv[2] == "--show" and os.path.isfile(sys.argv[3]):
       savFilename = sys.argv[3]
