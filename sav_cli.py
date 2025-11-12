@@ -461,8 +461,12 @@ def removeMercerShrine(levels, targetInstanceName: str) -> bool:
    return removeInstance(levels, "Mercer Shrine", rootObject, targetInstanceName, position)
 
 def setCrashSiteState(levels, instanceName: str, state: str) -> bool:
+   HARD_DRIVE_PATH = "/Game/FactoryGame/Resource/Environment/CrashSites/Desc_HardDrive.Desc_HardDrive_C"
+   INVENTORY_COMPONENT_CLASS = "/Script/FactoryGame.FGInventoryComponent"
+   
    exists = False
    currentState = "UNDISCOVERED"
+   inventoryInstanceName = f"{instanceName}.Inventory2"
 
    for level in levels:
       for actorOrComponentObjectHeader in level.actorAndComponentObjectHeaders:
@@ -473,107 +477,211 @@ def setCrashSiteState(levels, instanceName: str, state: str) -> bool:
       if exists:
          break
 
-   if exists:
-      for level in levels:
-         for object in level.objects:
-            if object.instanceName == instanceName:
-               hasBeenOpened = sav_parse.getPropertyValue(object.properties, "mHasBeenOpened")
-               if hasBeenOpened is not None and hasBeenOpened:
-                  hasBeenLooted = sav_parse.getPropertyValue(object.properties, "mHasBeenLooted")
-                  if hasBeenLooted is None:
-                     hasBeenLooted = True
-                  if hasBeenLooted:
-                     currentState = "EXPLORED_OPEN_EMPTY"
-                  else:
-                     currentState = "EXPLORED_OPEN_FULL"
+   if not exists:
+      print(f"WARNING: Crash site {instanceName} does not exist")
+      return False
+
+   inventoryExists = False
+   hasHardDrive = False
+   
+   for level in levels:
+      for object in level.objects:
+         if object.instanceName == inventoryInstanceName:
+            inventoryExists = True
+            inventoryStacks = sav_parse.getPropertyValue(object.properties, "mInventoryStacks")
+            if inventoryStacks is not None and len(inventoryStacks) > 0:
+               item = sav_parse.getPropertyValue(inventoryStacks[0][0], "Item")
+               if item is not None and len(item) == 2 and isinstance(item[0], str):
+                  if item[0] == HARD_DRIVE_PATH and item[1] != 0:
+                     hasHardDrive = True
+            break
+   
+   crashSiteObject = None
+   for level in levels:
+      for object in level.objects:
+         if object.instanceName == instanceName:
+            crashSiteObject = object
+            hasBeenOpened = sav_parse.getPropertyValue(object.properties, "mHasBeenOpened")
+            if hasBeenOpened is not None and hasBeenOpened:
+               if hasHardDrive:
+                  currentState = "EXPLORED_OPEN_FULL"
                else:
-                  currentState = "EXPLORED_CLOSED"
-               break
+                  currentState = "EXPLORED_OPEN_EMPTY"
+            else:
+               currentState = "EXPLORED_CLOSED"
+            break
+      if crashSiteObject is not None:
+         break
 
    if currentState == state:
+      print(f"Crash site {instanceName} is already in state {state}")
+      return False
+
+   def removeProperty(object, propertyName):
+      propsToRemove = []
+      for idx, prop in enumerate(object.properties):
+         if isinstance(prop, list) and len(prop) >= 2 and prop[0] == propertyName:
+            propsToRemove.append(idx)
+      for idx in reversed(propsToRemove):
+         del object.properties[idx]
+      
+      typesToRemove = []
+      for idx, propType in enumerate(object.propertyTypes):
+         if isinstance(propType, list) and len(propType) >= 1 and propType[0] == propertyName:
+            typesToRemove.append(idx)
+      for idx in reversed(typesToRemove):
+         del object.propertyTypes[idx]
+
+   def setBoolProperty(object, propertyName, value):
+      found = False
+      for prop in object.properties:
+         if isinstance(prop, list) and len(prop) >= 2 and prop[0] == propertyName:
+            prop[1] = value
+            found = True
+            break
+      if not found:
+         object.properties.append([propertyName, value])
+         object.propertyTypes.append([propertyName, "BoolProperty", 0])
+
+   def deleteInventory():
+      for level in levels:
+         headersToRemove = []
+         for idx, header in enumerate(level.actorAndComponentObjectHeaders):
+            if isinstance(header, sav_parse.ComponentHeader):
+               if header.instanceName == inventoryInstanceName:
+                  headersToRemove.append(idx)
+         for idx in reversed(headersToRemove):
+            del level.actorAndComponentObjectHeaders[idx]
+         
+         objectsToRemove = []
+         for idx, obj in enumerate(level.objects):
+            if obj.instanceName == inventoryInstanceName:
+               objectsToRemove.append(idx)
+         for idx in reversed(objectsToRemove):
+            del level.objects[idx]
+
+   def createInventory(withHardDrive):
+      targetLevel = None
+      for level in levels:
+         for header in level.actorAndComponentObjectHeaders:
+            if isinstance(header, sav_parse.ActorHeader):
+               if header.instanceName == instanceName:
+                  targetLevel = level
+                  break
+         if targetLevel is not None:
+            break
+      
+      if targetLevel is None:
+         print(f"ERROR: Could not find level for crash site {instanceName}")
+         return False
+      
+      newHeader = sav_parse.ComponentHeader()
+      newHeader.className = INVENTORY_COMPONENT_CLASS
+      newHeader.rootObject = "Persistent_Level"
+      newHeader.instanceName = inventoryInstanceName
+      newHeader.flags = 0
+      newHeader.parentActorName = instanceName
+      targetLevel.actorAndComponentObjectHeaders.append(newHeader)
+      
+      newObject = sav_parse.Object()
+      newObject.instanceName = inventoryInstanceName
+      newObject.objectGameVersion = 52
+      newObject.shouldMigrateObjectRefsToPersistentFlag = False
+      newObject.actorReferenceAssociations = None
+      
+      if withHardDrive:
+         itemStack = [
+            [["Item", [HARD_DRIVE_PATH, 1]], ["NumItems", 1]],
+            [["Item", ["StructProperty", "InventoryItem"], 0], ["NumItems", "IntProperty", 0]]
+         ]
+         newObject.properties = [["mInventoryStacks", [itemStack]]]
+         newObject.propertyTypes = [["mInventoryStacks", ["ArrayProperty", "StructProperty", "InventoryStack"], 0]]
+      else:
+         newObject.properties = []
+         newObject.propertyTypes = []
+      
+      newObject.actorSpecificInfo = True
+      
+      targetLevel.objects.append(newObject)
+      return True
+
+   def setInventoryContents(withHardDrive):
+      for level in levels:
+         for obj in level.objects:
+            if obj.instanceName == inventoryInstanceName:
+               if withHardDrive:
+                  inventoryStacks = sav_parse.getPropertyValue(obj.properties, "mInventoryStacks")
+                  if inventoryStacks is not None and len(inventoryStacks) > 0:
+                     inventoryStacks[0][0][0] = ["Item", [HARD_DRIVE_PATH, 1]]
+                     inventoryStacks[0][0][1] = ["NumItems", 1]
+                  else:
+                     itemStack = [
+                        [["Item", [HARD_DRIVE_PATH, 1]], ["NumItems", 1]],
+                        [["Item", ["StructProperty", "InventoryItem"], 0], ["NumItems", "IntProperty", 0]]
+                     ]
+                     obj.properties.append(["mInventoryStacks", [itemStack]])
+                     obj.propertyTypes.append(["mInventoryStacks", ["ArrayProperty", "StructProperty", "InventoryStack"], 0])
+               else:
+                  removeProperty(obj, "mInventoryStacks")
+               return True
       return False
 
    if state == "UNDISCOVERED":
-      print(f"WARNING: Setting crash site to UNDISCOVERED not fully implemented for {instanceName}, emulating with EXPLORED_CLOSED")
-      state = "EXPLORED_CLOSED"
-
-   if state == "EXPLORED_CLOSED":
-      if not exists:
-         print(f"WARNING: Cannot set non-existent crash site to EXPLORED_CLOSED for {instanceName}")
-         return False
+      if inventoryExists:
+         deleteInventory()
+      
       for level in levels:
-         for object in level.objects:
-            if object.instanceName == instanceName:
-               opened = False
-               looted = False
-               for prop in object.properties:
-                  if isinstance(prop, list) and len(prop) >= 2:
-                     if prop[0] == "mHasBeenOpened":
-                        prop[1] = False
-                        opened = True
-                     elif prop[0] == "mHasBeenLooted":
-                        prop[1] = False
-                        looted = True
-               if not opened:
-                  object.properties.append(["mHasBeenOpened", False])
-                  object.propertyTypes.append(["mHasBeenOpened", "BoolProperty", 0])
-               if not looted:
-                  object.properties.append(["mHasBeenLooted", False])
-                  object.propertyTypes.append(["mHasBeenLooted", "BoolProperty", 0])
-               print(f"Set crash site {instanceName} to EXPLORED_CLOSED")
-               return True
+         headersToRemove = []
+         for idx, header in enumerate(level.actorAndComponentObjectHeaders):
+            if isinstance(header, sav_parse.ActorHeader):
+               if header.instanceName == instanceName:
+                  headersToRemove.append(idx)
+         for idx in reversed(headersToRemove):
+            del level.actorAndComponentObjectHeaders[idx]
+         
+         objectsToRemove = []
+         for idx, obj in enumerate(level.objects):
+            if obj.instanceName == instanceName:
+               objectsToRemove.append(idx)
+         for idx in reversed(objectsToRemove):
+            del level.objects[idx]
+      
+      print(f"Set crash site {instanceName} to UNDISCOVERED (removed from save)")
+      return True
 
-   if state == "EXPLORED_OPEN_EMPTY":
-      if not exists:
-         print(f"WARNING: Cannot set non-existent crash site to EXPLORED_OPEN_EMPTY for {instanceName}")
-         return False
-      for level in levels:
-         for object in level.objects:
-            if object.instanceName == instanceName:
-               opened = False
-               looted = False
-               for prop in object.properties:
-                  if isinstance(prop, list) and len(prop) >= 2:
-                     if prop[0] == "mHasBeenOpened":
-                        prop[1] = True
-                        opened = True
-                     elif prop[0] == "mHasBeenLooted":
-                        prop[1] = True
-                        looted = True
-               if not opened:
-                  object.properties.append(["mHasBeenOpened", True])
-                  object.propertyTypes.append(["mHasBeenOpened", "BoolProperty", 0])
-               if not looted:
-                  object.properties.append(["mHasBeenLooted", True])
-                  object.propertyTypes.append(["mHasBeenLooted", "BoolProperty", 0])
-               print(f"Set crash site {instanceName} to EXPLORED_OPEN_EMPTY")
-               return True
+   elif state == "EXPLORED_CLOSED":
+      if inventoryExists:
+         deleteInventory()
+      
+      removeProperty(crashSiteObject, "mHasBeenOpened")
+      removeProperty(crashSiteObject, "mHasBeenLooted")
+      
+      print(f"Set crash site {instanceName} to EXPLORED_CLOSED")
+      return True
 
-   if state == "EXPLORED_OPEN_FULL":
-      if not exists:
-         print(f"WARNING: Cannot set non-existent crash site to EXPLORED_OPEN_FULL for {instanceName}")
-         return False
-      for level in levels:
-         for object in level.objects:
-            if object.instanceName == instanceName:
-               opened = False
-               looted = False
-               for prop in object.properties:
-                  if isinstance(prop, list) and len(prop) >= 2:
-                     if prop[0] == "mHasBeenOpened":
-                        prop[1] = True
-                        opened = True
-                     elif prop[0] == "mHasBeenLooted":
-                        prop[1] = False
-                        looted = True
-               if not opened:
-                  object.properties.append(["mHasBeenOpened", True])
-                  object.propertyTypes.append(["mHasBeenOpened", "BoolProperty", 0])
-               if not looted:
-                  object.properties.append(["mHasBeenLooted", False])
-                  object.propertyTypes.append(["mHasBeenLooted", "BoolProperty", 0])
-               print(f"Set crash site {instanceName} to EXPLORED_OPEN_FULL")
-               return True
+   elif state == "EXPLORED_OPEN_EMPTY":
+      setBoolProperty(crashSiteObject, "mHasBeenOpened", True)
+      setBoolProperty(crashSiteObject, "mHasBeenLooted", True)
+      
+      if inventoryExists:
+         setInventoryContents(withHardDrive=False)
+      else:
+         createInventory(withHardDrive=False)
+      
+      print(f"Set crash site {instanceName} to EXPLORED_OPEN_EMPTY")
+      return True
+
+   elif state == "EXPLORED_OPEN_FULL":
+      setBoolProperty(crashSiteObject, "mHasBeenOpened", True)
+      removeProperty(crashSiteObject, "mHasBeenLooted")
+      
+      if inventoryExists:
+         setInventoryContents(withHardDrive=True)
+      else:
+         createInventory(withHardDrive=True)
+      
+      print(f"Set crash site {instanceName} to EXPLORED_OPEN_FULL")
+      return True
 
    return False
 
@@ -1768,7 +1876,7 @@ if __name__ == '__main__':
       try:
          parsedSave = sav_parse.readFullSaveFile(savFilename)
          for instanceName in sav_data.crashSites.CRASH_SITES:
-            if setCrashSiteState(parsedSave.levels, instanceName, "EXPLORED_CLOSED"):
+            if setCrashSiteState(parsedSave.levels, instanceName, "UNDISCOVERED"):
                modifiedFlag = True
 
       except Exception as error:
